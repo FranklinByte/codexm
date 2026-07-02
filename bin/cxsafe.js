@@ -18,6 +18,7 @@ const REQUEST_TIMEOUT_MS = 8000;
 const REFRESH_GRACE_SECONDS = 24 * 60 * 60;
 const FIVE_HOURS_SECONDS = 5 * 60 * 60;
 const LIMITED_REMAINING_PERCENT = 3;
+const DEFAULT_TIME_ZONE = 'Asia/Singapore';
 
 const STATES = Object.freeze({
   AVAILABLE: 'available',
@@ -484,16 +485,49 @@ function formatRemaining(value) {
   return typeof value === 'number' ? `${value}%` : '-';
 }
 
-function formatReset(value, mode = 'full') {
+function displayTimeZone(env = process.env) {
+  return env.CODEXM_TIME_ZONE || DEFAULT_TIME_ZONE;
+}
+
+function datePartsInTimeZone(epochSeconds, timeZone) {
+  let formatter;
+  try {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+  } catch (_) {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: DEFAULT_TIME_ZONE,
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+  }
+  const parts = {};
+  for (const part of formatter.formatToParts(new Date(epochSeconds * 1000))) {
+    if (part.type !== 'literal') parts[part.type] = part.value;
+  }
+  return {
+    month: parts.month || '--',
+    day: parts.day || '--',
+    hour: parts.hour || '--',
+    minute: parts.minute || '--',
+  };
+}
+
+function formatReset(value, mode = 'full', env = process.env) {
   if (typeof value !== 'number') return '';
   const now = Math.floor(Date.now() / 1000);
   if (value <= now) return 'reset';
-  const date = new Date(value * 1000);
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
+  const { month, day, hour, minute } = datePartsInTimeZone(value, displayTimeZone(env));
   if (mode === 'time') return `${hour}:${minute}`;
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
   return `${month}-${day} ${hour}:${minute}`;
 }
 
@@ -523,9 +557,9 @@ function outputUsageTable(accounts, usages, env = process.env, output = process.
       account: displayAccount(account),
       plan: formatPlan(usage.plan),
       nextRemaining: formatRemaining(usage.nextRemaining),
-      nextReset: formatReset(usage.nextReset, 'time') || '-',
+      nextReset: formatReset(usage.nextReset, 'time', env) || '-',
       totalRemaining: formatRemaining(usage.totalRemaining),
-      totalReset: formatReset(usage.totalReset) || '-',
+      totalReset: formatReset(usage.totalReset, 'full', env) || '-',
       state: usage.state || STATES.UNKNOWN,
       stateLabel: stateLabel(usage.state || STATES.UNKNOWN),
       isCurrent,
@@ -842,6 +876,7 @@ async function cmdDoctor(env, output) {
   output.write(`codex binary:    ${findCodexBin(env) || '(not found)'}\n`);
   output.write(`usage endpoint:  ${env.CODEX_USAGE_ENDPOINT || USAGE_ENDPOINT}\n`);
   output.write(`refresh endpoint:${env.CODEX_REFRESH_TOKEN_URL_OVERRIDE || REFRESH_ENDPOINT}\n`);
+  output.write(`display time zone:${displayTimeZone(env)}\n`);
 }
 
 function printHelp(output = process.stdout) {
@@ -947,6 +982,8 @@ module.exports = {
   normalizeAccount,
   classifyUsage,
   remainingFromUsed,
+  formatReset,
+  displayTimeZone,
 };
 
 

@@ -83,6 +83,7 @@ No other network endpoints are used by this script.
 ```text
 CODEX_HOME
 CODEXM_STORE
+CODEXM_TIME_ZONE
 CODEX_SAFE_STORE
 CODEX_BIN
 CODEX_USAGE_ENDPOINT
@@ -90,7 +91,7 @@ CODEX_REFRESH_TOKEN_URL_OVERRIDE
 NO_COLOR
 ```
 
-`CODEX_HOME` lets you test against a temporary Codex home instead of touching `~/.codex`.
+`CODEX_HOME` lets you test against a temporary Codex home instead of touching `~/.codex`. Reset times are displayed in `Asia/Singapore` by default; set `CODEXM_TIME_ZONE` to override it.
 
 ## Notes
 
