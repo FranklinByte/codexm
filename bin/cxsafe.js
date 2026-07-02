@@ -377,6 +377,7 @@ function classifyUsage(item) {
   if (!item || item.error) return item && item.state ? item.state : STATES.UNKNOWN;
   if (item.plan === 'free') return classifyWindowRemaining(item.totalRemaining);
   if (typeof item.totalRemaining !== 'number' || item.totalRemaining <= 0) return STATES.COOLING;
+  if (typeof item.nextSeconds !== 'number') return classifyWindowRemaining(item.totalRemaining);
   return classifyWindowRemaining(item.nextRemaining);
 }
 
@@ -606,8 +607,10 @@ function usageJson(accounts, usages, env = process.env) {
       state: usage.state || STATES.UNKNOWN,
       nextRemaining: usage.nextRemaining ?? null,
       nextReset: usage.nextReset ?? null,
+      nextSeconds: usage.nextSeconds ?? null,
       totalRemaining: usage.totalRemaining ?? null,
       totalReset: usage.totalReset ?? null,
+      totalSeconds: usage.totalSeconds ?? null,
       error: usage.error || '',
     };
   });

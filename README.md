@@ -25,6 +25,7 @@ This tool is intentionally small:
 - no background service
 - no silent account deletion; offline cleanup is interactive unless you pass `--yes`
 - automatic token refresh for normal `list` / `use` workflows
+- accounts without a 5h window are treated as long-window-only accounts
 - usage and refresh requests only go to OpenAI/ChatGPT endpoints
 
 It stores accounts in:
