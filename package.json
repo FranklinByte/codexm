@@ -1,0 +1,23 @@
+{
+  "name": "codexm",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-only Codex account manager and official usage viewer.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "bin": {
+    "codexm": "bin/cxsafe.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node --check bin/cxsafe.js",
+    "smoke": "node bin/cxsafe.js help"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FranklinByte/codexm.git"
+  },
+  "homepage": "https://github.com/FranklinByte/codexm#readme"
+}

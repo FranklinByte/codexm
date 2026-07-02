@@ -1,0 +1,19 @@
+node_modules/
+npm-debug.log*
+*.tgz
+
+.env
+.env.*
+.DS_Store
+
+# Local npm command shims generated during development.
+codexm.cmd
+codexm.ps1
+cxsafe.cmd
+cxsafe.ps1
+
+# Never commit Codex account state or auth material.
+.codex/
+auth.json
+codexm-accounts.json
+codex-accounts.json
