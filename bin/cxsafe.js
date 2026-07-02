@@ -377,7 +377,7 @@ function classifyUsage(item) {
   if (!item || item.error) return item && item.state ? item.state : STATES.UNKNOWN;
   if (item.plan === 'free') return classifyWindowRemaining(item.totalRemaining);
   if (typeof item.totalRemaining !== 'number' || item.totalRemaining <= 0) return STATES.COOLING;
-  if (typeof item.nextSeconds !== 'number') return classifyWindowRemaining(item.totalRemaining);
+  if (typeof item.nextRemaining !== 'number') return classifyWindowRemaining(item.totalRemaining);
   return classifyWindowRemaining(item.nextRemaining);
 }
 
