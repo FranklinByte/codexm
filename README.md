@@ -78,6 +78,16 @@ https://auth.openai.com/oauth/token
 
 No other network endpoints are used by this script.
 
+## Windows + WSL
+
+Use one shared account store to avoid refresh-token drift between Windows and WSL. Keep each environment's active auth file local, but point WSL at the Windows codexm account store:
+
+```bash
+export CODEXM_STORE=/mnt/c/Users/Kellan/.codex/codexm-accounts.json
+```
+
+Add that line to `~/.bashrc` or `~/.zshrc` in WSL. After this, `codexm list`, `codexm use`, and `codexm refresh` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`.
+
 ## Environment Variables
 
 ```text

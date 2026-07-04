@@ -234,6 +234,25 @@ function activeLabel(env = process.env) {
     return '';
   }
 }
+function sameAuthTokens(left, right) {
+  return JSON.stringify((left && left.tokens) || {}) === JSON.stringify((right && right.tokens) || {});
+}
+
+function syncActiveAuthFromStore(accounts, env = process.env) {
+  const active = activeLabel(env).toLowerCase();
+  if (!active) return false;
+  const account = accounts.find((item) => item.id && item.id.toLowerCase() === active);
+  if (!account || !account.auth) return false;
+  let current;
+  try {
+    current = readActiveAuth(env);
+  } catch (_) {
+    return false;
+  }
+  if (!current || sameAuthTokens(current, account.auth)) return false;
+  writeFileAtomic(getAuthPath(env), JSON.stringify(account.auth, null, 2) + '\n');
+  return true;
+}
 
 function resolveAccount(selector, accounts) {
   if (!selector) throw new Error('missing account selector');
@@ -729,6 +748,7 @@ async function cmdList(args, env, output) {
   const noRefresh = args.includes('--no-refresh');
   let accounts = readSafeStore(env);
   if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env);
+  syncActiveAuthFromStore(accounts, env);
   if (noUsage) {
     if (json) output.write(`${JSON.stringify(usageJson(accounts, [], env), null, 2)}\n`);
     else outputAccountTable(accounts, env, output);
@@ -744,6 +764,7 @@ async function cmdUse(args, env, output) {
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
     accounts = await refreshAccountsIfNeeded(accounts, env);
+    syncActiveAuthFromStore(accounts, env);
     const usages = await Promise.all(accounts.map((account) => fetchUsage(account, env)));
     const active = activeLabel(env).toLowerCase();
     const current = accounts.find((account) => active && account.id.toLowerCase() === active);
@@ -794,7 +815,9 @@ async function cmdRefresh(args, env, output) {
     byId.set(account.id.toLowerCase(), normalizeAccount(nextAuth, 'refresh'));
     output.write(`refreshed ${displayAccount(account)}\n`);
   }
-  writeSafeStore([...byId.values()], env);
+  const nextAccounts = [...byId.values()];
+  writeSafeStore(nextAccounts, env);
+  syncActiveAuthFromStore(nextAccounts, env);
 }
 
 async function cmdRemove(args, env, output, input) {
@@ -984,6 +1007,7 @@ module.exports = {
   remainingFromUsed,
   formatReset,
   displayTimeZone,
+  syncActiveAuthFromStore,
 };
 
 
