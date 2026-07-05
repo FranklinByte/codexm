@@ -5,10 +5,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline/promises');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const STORE_VERSION = 1;
 const SAFE_STORE_NAME = 'codexm-accounts.json';
+const SESSION_STORE_NAME = 'codexm-sessions.json';
 const CODEXS_STORE_NAME = 'codex-accounts.json';
 const AUTH_FILE_NAME = 'auth.json';
 const USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage';
@@ -16,6 +17,8 @@ const REFRESH_ENDPOINT = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REQUEST_TIMEOUT_MS = 8000;
 const REFRESH_GRACE_SECONDS = 24 * 60 * 60;
+const SESSION_HEARTBEAT_MS = 30 * 1000;
+const SESSION_STALE_MS = 12 * 60 * 60 * 1000;
 const FIVE_HOURS_SECONDS = 5 * 60 * 60;
 const LIMITED_REMAINING_PERCENT = 3;
 const DEFAULT_TIME_ZONE = 'Asia/Singapore';
@@ -24,6 +27,7 @@ const STATES = Object.freeze({
   AVAILABLE: 'available',
   LIMITED: 'limited',
   COOLING: 'cooling',
+  IN_USE: 'in-use',
   OFFLINE: 'offline',
   UNKNOWN: 'unknown',
 });
@@ -49,6 +53,12 @@ function getCodexHome(env = process.env) {
 
 function getSafeStorePath(env = process.env) {
   return env.CODEXM_STORE || env.CODEX_SAFE_STORE || path.join(getCodexHome(env), SAFE_STORE_NAME);
+}
+
+function getSessionStorePath(env = process.env) {
+  return env.CODEXM_SESSION_STORE
+    || env.CODEX_SAFE_SESSION_STORE
+    || path.join(path.dirname(getSafeStorePath(env)), SESSION_STORE_NAME);
 }
 
 function getCodexsStorePath(env = process.env) {
@@ -217,6 +227,125 @@ function writeSafeStore(accounts, env = process.env) {
   }, null, 2)}\n`);
 }
 
+
+function numericEnv(env, name, fallback) {
+  const value = Number(env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function sessionStaleMs(env = process.env) {
+  return numericEnv(env, 'CODEXM_SESSION_STALE_MS', SESSION_STALE_MS);
+}
+
+function sessionHeartbeatMs(env = process.env) {
+  return numericEnv(env, 'CODEXM_SESSION_HEARTBEAT_MS', SESSION_HEARTBEAT_MS);
+}
+
+function normalizeSession(session) {
+  if (!session || typeof session !== 'object') return null;
+  if (!session.id || !session.accountId) return null;
+  return {
+    id: String(session.id),
+    accountId: String(session.accountId),
+    label: String(session.label || session.accountId),
+    pid: Number(session.pid) || 0,
+    host: String(session.host || ''),
+    platform: String(session.platform || ''),
+    codexHome: String(session.codexHome || ''),
+    startedAt: String(session.startedAt || session.updatedAt || ''),
+    updatedAt: String(session.updatedAt || session.startedAt || ''),
+  };
+}
+
+function pruneSessions(sessions, env = process.env) {
+  const now = Date.now();
+  const staleMs = sessionStaleMs(env);
+  return sessions.filter((session) => {
+    const updated = Date.parse(session.updatedAt);
+    return Number.isFinite(updated) && now - updated <= staleMs;
+  });
+}
+
+function readSessionStore(env = process.env) {
+  const storePath = getSessionStorePath(env);
+  const store = readJsonFile(storePath, null);
+  if (!store) return [];
+  if (!store || store.version !== STORE_VERSION || !Array.isArray(store.sessions)) return [];
+  return pruneSessions(store.sessions.map(normalizeSession).filter(Boolean), env);
+}
+
+function writeSessionStore(sessions, env = process.env) {
+  const seen = new Set();
+  const normalized = [];
+  for (const session of pruneSessions(sessions.map(normalizeSession).filter(Boolean), env)) {
+    const key = session.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(session);
+  }
+  writeFileAtomic(getSessionStorePath(env), JSON.stringify({
+    version: STORE_VERSION,
+    sessions: normalized,
+  }, null, 2) + '\n');
+}
+
+function sessionsByAccount(env = process.env) {
+  const byId = new Map();
+  for (const session of readSessionStore(env)) {
+    const key = session.accountId.toLowerCase();
+    if (!byId.has(key)) byId.set(key, session);
+  }
+  return byId;
+}
+
+function sessionSummary(session) {
+  if (!session) return '';
+  const parts = [];
+  if (session.host) parts.push(session.host);
+  if (session.pid) parts.push('pid ' + session.pid);
+  return parts.join(' ');
+}
+
+function createSessionLease(account, env = process.env, output = process.stderr) {
+  const startedAt = new Date().toISOString();
+  const lease = {
+    id: [os.hostname(), process.pid, Date.now().toString(36), Math.random().toString(36).slice(2)].join('-'),
+    accountId: account.id,
+    label: displayAccount(account),
+    pid: process.pid,
+    host: os.hostname(),
+    platform: process.platform,
+    codexHome: getCodexHome(env),
+    startedAt,
+    updatedAt: startedAt,
+  };
+
+  const save = () => {
+    lease.updatedAt = new Date().toISOString();
+    const sessions = readSessionStore(env).filter((session) => session.id !== lease.id);
+    writeSessionStore([...sessions, lease], env);
+  };
+
+  save();
+  return {
+    lease,
+    touch() {
+      try {
+        save();
+      } catch (_) {}
+    },
+    release() {
+      try {
+        const sessions = readSessionStore(env).filter((session) => session.id !== lease.id);
+        writeSessionStore(sessions, env);
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        output.write('warning: failed to clear codexm session lease: ' + message + '\n');
+      }
+    },
+  };
+}
+
 function upsertAccount(auth, env = process.env, source = 'manual') {
   const next = normalizeAccount(auth, source);
   const current = readSafeStore(env);
@@ -306,10 +435,14 @@ function hasAccessFields(account) {
   return Boolean(tokens && typeof tokens.access_token === 'string' && typeof tokens.account_id === 'string');
 }
 
-function tokenExpiresSoon(auth, nowSeconds = Math.floor(Date.now() / 1000)) {
+function accessTokenExpiresWithin(auth, skewSeconds = 60, nowSeconds = Math.floor(Date.now() / 1000)) {
   const payload = decodeJwtPayload(auth && auth.tokens && auth.tokens.access_token);
   if (!payload || typeof payload.exp !== 'number') return true;
-  return payload.exp - nowSeconds <= REFRESH_GRACE_SECONDS;
+  return payload.exp - nowSeconds <= skewSeconds;
+}
+
+function tokenExpiresSoon(auth, nowSeconds = Math.floor(Date.now() / 1000)) {
+  return accessTokenExpiresWithin(auth, REFRESH_GRACE_SECONDS, nowSeconds);
 }
 
 function refreshBody(refreshToken) {
@@ -418,6 +551,30 @@ async function fetchUsage(account, env = process.env, fetchImpl = fetch) {
   }
 }
 
+
+async function fetchUsageForList(account, busyByAccount, env = process.env) {
+  const busy = busyByAccount.get(account.id.toLowerCase());
+  if (busy && accessTokenExpiresWithin(account.auth, 60)) {
+    return {
+      id: account.id,
+      state: STATES.IN_USE,
+      error: ('active codex session ' + sessionSummary(busy)).trim(),
+    };
+  }
+  const usage = await fetchUsage(account, env);
+  if (!busy) return usage;
+  return {
+    ...usage,
+    state: STATES.IN_USE,
+    error: usage.error || ('active codex session ' + sessionSummary(busy)).trim(),
+  };
+}
+
+async function fetchUsagesForList(accounts, env = process.env) {
+  const busyByAccount = sessionsByAccount(env);
+  return Promise.all(accounts.map((account) => fetchUsageForList(account, busyByAccount, env)));
+}
+
 function classifyWindowRemaining(remaining) {
   if (typeof remaining !== 'number') return STATES.COOLING;
   if (remaining <= 0) return STATES.COOLING;
@@ -433,11 +590,17 @@ function classifyUsage(item) {
   return classifyWindowRemaining(item.nextRemaining);
 }
 
-async function refreshAccountsIfNeeded(accounts, env = process.env, output = process.stderr) {
+async function refreshAccountsIfNeeded(accounts, env = process.env, output = process.stderr, options = {}) {
   let changed = false;
   const active = activeLabel(env);
+  const skipBusy = options.skipBusy !== false;
+  const busyByAccount = skipBusy ? sessionsByAccount(env) : new Map();
   const refreshed = [];
   for (const account of accounts) {
+    if (busyByAccount.has(account.id.toLowerCase())) {
+      refreshed.push(account);
+      continue;
+    }
     if (!tokenExpiresSoon(account.auth)) {
       refreshed.push(account);
       continue;
@@ -488,15 +651,21 @@ function isExecutable(filePath) {
 }
 
 function runCodex(codexBin, args, env = process.env) {
-  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(codexBin)) {
-    const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
-    return spawnSync(comspec, ['/d', '/s', '/c', `"${codexBin}" ${args.map((arg) => `"${String(arg).replace(/"/g, '\"')}"`).join(' ')}`], {
-      stdio: 'inherit',
-      env,
-      windowsVerbatimArguments: true,
-    });
-  }
-  return spawnSync(codexBin, args, { stdio: 'inherit', env });
+  return new Promise((resolve) => {
+    let child;
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(codexBin)) {
+      const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
+      child = spawn(comspec, ['/d', '/s', '/c', `"${codexBin}" ${args.map((arg) => `"${String(arg).replace(/"/g, '\"')}"`).join(' ')}`], {
+        stdio: 'inherit',
+        env,
+        windowsVerbatimArguments: true,
+      });
+    } else {
+      child = spawn(codexBin, args, { stdio: 'inherit', env });
+    }
+    child.on('error', (error) => resolve({ error }));
+    child.on('exit', (status, signal) => resolve({ status, signal }));
+  });
 }
 
 function runCodexLogin(codexBin, tempHome, env = process.env) {
@@ -601,7 +770,7 @@ function stateLabel(state) {
 function stateDisplay(state, env, stream) {
   const label = stateLabel(state);
   if (!label) return '';
-  if (state === STATES.LIMITED) return yellow(label, env, stream);
+  if (state === STATES.LIMITED || state === STATES.IN_USE) return yellow(label, env, stream);
   if (state === STATES.COOLING || state === STATES.OFFLINE) return red(label, env, stream);
   return label;
 }
@@ -792,14 +961,14 @@ async function cmdList(args, env, output) {
   const noRefresh = args.includes('--no-refresh');
   let accounts = readSafeStore(env);
   syncActiveAuthFromStore(accounts, env);
-  if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env);
+  if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env, output);
   syncActiveAuthFromStore(accounts, env);
   if (noUsage) {
     if (json) output.write(`${JSON.stringify(usageJson(accounts, [], env), null, 2)}\n`);
     else outputAccountTable(accounts, env, output);
     return;
   }
-  const usages = await Promise.all(accounts.map((account) => fetchUsage(account, env)));
+  const usages = await fetchUsagesForList(accounts, env);
   if (json) output.write(`${JSON.stringify(usageJson(accounts, usages, env), null, 2)}\n`);
   else outputUsageTable(accounts, usages, env, output);
 }
@@ -809,9 +978,9 @@ async function cmdUse(args, env, output) {
   syncActiveAuthFromStore(accounts, env);
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
-    accounts = await refreshAccountsIfNeeded(accounts, env);
+    accounts = await refreshAccountsIfNeeded(accounts, env, output);
     syncActiveAuthFromStore(accounts, env);
-    const usages = await Promise.all(accounts.map((account) => fetchUsage(account, env)));
+    const usages = await fetchUsagesForList(accounts, env);
     const active = activeLabel(env).toLowerCase();
     const current = accounts.find((account) => active && account.id.toLowerCase() === active);
     const currentUsage = current ? usages.find((item) => item.id === current.id) : null;
@@ -839,8 +1008,10 @@ async function activateAccount(account, env, output) {
 }
 
 async function cmdRefresh(args, env, output) {
-  const selector = args[0] || 'all';
-  if (args.length > 1) throw new Error('usage: codexm refresh [all|account]');
+  const force = args.includes('--force');
+  const positional = args.filter((arg) => arg !== '--force');
+  const selector = positional[0] || 'all';
+  if (positional.length > 1) throw new Error('usage: codexm refresh [all|account] [--force]');
   const accounts = readSafeStore(env);
   syncActiveAuthFromStore(accounts, env);
   const targets = selector === 'all'
@@ -848,7 +1019,13 @@ async function cmdRefresh(args, env, output) {
     : [resolveAccount(selector, accounts)].filter(Boolean);
   if (targets.length === 0) throw new Error(`account not found: ${selector}`);
   const byId = new Map(accounts.map((account) => [account.id.toLowerCase(), account]));
+  const busyByAccount = sessionsByAccount(env);
   for (const account of targets) {
+    const busy = busyByAccount.get(account.id.toLowerCase());
+    if (busy && !force) {
+      output.write(`skipped ${displayAccount(account)}: active codex session ${sessionSummary(busy)}; use --force to refresh anyway\n`);
+      continue;
+    }
     const nextAuth = await refreshAuth(account.auth, env);
     if (!nextAuth) {
       output.write(`skipped ${displayAccount(account)}: no refresh_token\n`);
@@ -873,12 +1050,31 @@ async function cmdRun(args, env, output) {
   } catch (_) {
     beforeAuth = null;
   }
-  const result = runCodex(codexBin, args, env);
+  let lease = null;
+  let heartbeat = null;
   try {
-    upsertActiveAuthIfChanged(beforeAuth, env, 'codex-run');
+    const runAccount = beforeAuth ? normalizeAccount(beforeAuth, 'codex-run') : null;
+    if (runAccount) {
+      lease = createSessionLease(runAccount, env, output);
+      heartbeat = setInterval(() => lease.touch(), sessionHeartbeatMs(env));
+      if (typeof heartbeat.unref === 'function') heartbeat.unref();
+    }
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
-    output.write(`warning: failed to sync active auth after codex: ${message}\n`);
+    output.write(`warning: failed to create codexm session lease: ${message}\n`);
+  }
+  let result;
+  try {
+    result = await runCodex(codexBin, args, env);
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (lease) lease.release();
+    try {
+      upsertActiveAuthIfChanged(beforeAuth, env, 'codex-run');
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      output.write(`warning: failed to sync active auth after codex: ${message}\n`);
+    }
   }
   if (result.error) throw result.error;
   if (typeof result.status === 'number' && result.status !== 0) process.exitCode = result.status;
@@ -909,12 +1105,12 @@ async function cmdRemove(args, env, output, input) {
 }
 
 async function cmdRemoveOffline(env, output, input, yes = false) {
-  const accounts = await refreshAccountsIfNeeded(readSafeStore(env), env);
+  const accounts = await refreshAccountsIfNeeded(readSafeStore(env), env, output);
   if (accounts.length === 0) {
     output.write('no accounts in codexm store\n');
     return;
   }
-  const usages = await Promise.all(accounts.map((account) => fetchUsage(account, env)));
+  const usages = await fetchUsagesForList(accounts, env);
   const offlineIds = new Set(usages
     .filter((item) => item.state === STATES.OFFLINE)
     .map((item) => item.id.toLowerCase()));
@@ -958,7 +1154,10 @@ async function cmdDoctor(env, output) {
   const codexsStore = getCodexsStorePath(env);
   output.write(`Codex home:      ${getCodexHome(env)}\n`);
   output.write(`Active auth:     ${authPath} ${fs.existsSync(authPath) ? '(exists)' : '(missing)'}\n`);
+  const sessionStore = getSessionStorePath(env);
+  const sessions = readSessionStore(env);
   output.write(`codexm store:    ${safeStore} ${fs.existsSync(safeStore) ? '(exists)' : '(missing)'}\n`);
+  output.write(`session store:   ${sessionStore} ${fs.existsSync(sessionStore) ? `(${sessions.length} active)` : '(missing)'}\n`);
   output.write(`codexs store:    ${codexsStore} ${fs.existsSync(codexsStore) ? '(exists)' : '(missing)'}\n`);
   output.write(`codex binary:    ${findCodexBin(env) || '(not found)'}\n`);
   output.write(`usage endpoint:  ${env.CODEX_USAGE_ENDPOINT || USAGE_ENDPOINT}\n`);
@@ -977,15 +1176,15 @@ Commands:
   codexm add | a
   codexm list | l [--json] [--no-usage] [--no-refresh]
   codexm use | u [account]
-  codexm refresh [all|account]
+  codexm refresh [all|account] [--force]
   codexm run [codex args...]
   codexm remove | r [account] [--yes]
   codexm help
 
 Defaults:
-  list and use automatically refresh expiring access tokens before checking usage.
+  list and use automatically refresh expiring access tokens before checking usage, except accounts currently in codexm run.
   remove without account probes usage and interactively removes offline accounts.
-  run wraps the official codex CLI and syncs auth before and after it exits.
+  run wraps the official codex CLI, marks the account in-use while running, and syncs auth after it exits.
 
 Account selectors:
   1, 2, ...          list index
@@ -1079,6 +1278,8 @@ module.exports = {
   syncActiveAuthFromStore,
   upsertActiveAuthIfChanged,
   rememberActiveAuthIfMissing,
+  getSessionStorePath,
+  sessionsByAccount,
 };
 
 

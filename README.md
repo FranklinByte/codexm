@@ -25,6 +25,7 @@ This tool is intentionally small:
 - no background service
 - no silent account deletion; offline cleanup is interactive unless you pass `--yes`
 - automatic token refresh for normal `list` / `use` workflows
+- active `codexm run` sessions are marked in-use so another terminal will not rotate that account's refresh token
 - accounts without a 5h window are treated as long-window-only accounts
 - usage and refresh requests only go to OpenAI/ChatGPT endpoints
 
@@ -32,6 +33,12 @@ It stores accounts in:
 
 ```text
 ~/.codex/codexm-accounts.json
+```
+
+Running Codex sessions are tracked without secrets in:
+
+```text
+~/.codex/codexm-sessions.json
 ```
 
 The active Codex login remains:
@@ -52,6 +59,7 @@ codexm u user@example.com
 codexm u
 codexm a
 codexm refresh all
+codexm refresh all --force
 codexm run --help
 codexm r
 codexm r 1 --yes
@@ -59,7 +67,7 @@ codexm r 1 --yes
 
 Short aliases are supported: `i`, `a`, `l`, `u`, `r`.
 
-By default, `list` and `use` refresh access tokens that are missing or close to expiry. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh.
+By default, `list` and `use` refresh access tokens that are missing or close to expiry, but they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
 
 `sync-codexs` overwrites the codexm store with the current `codexs` account store. `import-codexs` merges instead.
 
@@ -84,7 +92,7 @@ No other network endpoints are used by this script.
 Use one shared account store to avoid refresh-token drift between Windows and WSL. Keep each environment's active auth file local, but point WSL at the Windows codexm account store:
 
 ```bash
-export CODEXM_STORE=/mnt/c/Users/Kellan/.codex/codexm-accounts.json
+export CODEXM_STORE=/mnt/c/Users/<WindowsUser>/.codex/codexm-accounts.json
 ```
 
 Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex CLI so refreshes performed by Codex are copied back into the shared store:
@@ -93,7 +101,7 @@ Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex 
 alias codex='codexm run'
 ```
 
-After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`.
+After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`. While `codexm run` is active, other terminals see that account as `in-use` and will not rotate its refresh token during list/refresh checks.
 
 ## Environment Variables
 
@@ -101,6 +109,9 @@ After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read
 CODEX_HOME
 CODEXM_STORE
 CODEXM_TIME_ZONE
+CODEXM_SESSION_STORE
+CODEXM_SESSION_STALE_MS
+CODEXM_SESSION_HEARTBEAT_MS
 CODEX_SAFE_STORE
 CODEX_BIN
 CODEX_USAGE_ENDPOINT
@@ -113,4 +124,3 @@ NO_COLOR
 ## Notes
 
 The behavior is inspired by the locally installed `@uninto/codexs` package, but this implementation is written as a self-contained personal script with visible source and no external dependencies.
-
