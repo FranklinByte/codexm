@@ -395,26 +395,6 @@ function upsertActiveAuthIfChanged(beforeAuth, env = process.env, source = 'acti
   return true;
 }
 
-function rememberActiveAuthIfMissing(env = process.env, source = 'pre-switch-backup') {
-  let current;
-  try {
-    current = readActiveAuth(env);
-  } catch (_) {
-    return false;
-  }
-  if (!current) return false;
-  let account;
-  try {
-    account = normalizeAccount(current, source);
-  } catch (_) {
-    return false;
-  }
-  const accounts = readSafeStore(env);
-  if (accounts.some((item) => item.id && item.id.toLowerCase() === account.id.toLowerCase())) return false;
-  writeSafeStore([...accounts, account], env);
-  return true;
-}
-
 function resolveAccount(selector, accounts) {
   if (!selector) throw new Error('missing account selector');
   if (/^\d+$/.test(selector)) {
@@ -1002,7 +982,6 @@ async function cmdUse(args, env, output) {
 }
 
 async function activateAccount(account, env, output) {
-  rememberActiveAuthIfMissing(env, 'pre-switch-backup');
   writeFileAtomic(getAuthPath(env), `${JSON.stringify(account.auth, null, 2)}\n`);
   output.write(`activated ${displayAccount(account)} at ${getAuthPath(env)}\n`);
 }
@@ -1277,7 +1256,6 @@ module.exports = {
   displayTimeZone,
   syncActiveAuthFromStore,
   upsertActiveAuthIfChanged,
-  rememberActiveAuthIfMissing,
   getSessionStorePath,
   sessionsByAccount,
 };

@@ -26,6 +26,7 @@ This tool is intentionally small:
 - no silent account deletion; offline cleanup is interactive unless you pass `--yes`
 - automatic token refresh for normal `list` / `use` workflows
 - active `codexm run` sessions are marked in-use so another terminal will not rotate that account's refresh token
+- account switching does not silently re-add an active auth that was removed from the store
 - accounts without a 5h window are treated as long-window-only accounts
 - usage and refresh requests only go to OpenAI/ChatGPT endpoints
 
@@ -101,7 +102,7 @@ Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex 
 alias codex='codexm run'
 ```
 
-After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`. While `codexm run` is active, other terminals see that account as `in-use` and will not rotate its refresh token during list/refresh checks.
+After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching, and switching will not re-add an active account that you removed from the store; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`. While `codexm run` is active, other terminals see that account as `in-use` and will not rotate its refresh token during list/refresh checks.
 
 ## Environment Variables
 
