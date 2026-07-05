@@ -16,7 +16,7 @@ const USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage';
 const REFRESH_ENDPOINT = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REQUEST_TIMEOUT_MS = 8000;
-const REFRESH_GRACE_SECONDS = 24 * 60 * 60;
+const REFRESH_GRACE_SECONDS = 5 * 60;
 const SESSION_HEARTBEAT_MS = 30 * 1000;
 const SESSION_STALE_MS = 12 * 60 * 60 * 1000;
 const FIVE_HOURS_SECONDS = 5 * 60 * 60;
@@ -233,6 +233,10 @@ function numericEnv(env, name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function refreshGraceSeconds(env = process.env) {
+  return numericEnv(env, 'CODEXM_REFRESH_GRACE_SECONDS', REFRESH_GRACE_SECONDS);
+}
+
 function sessionStaleMs(env = process.env) {
   return numericEnv(env, 'CODEXM_SESSION_STALE_MS', SESSION_STALE_MS);
 }
@@ -421,8 +425,8 @@ function accessTokenExpiresWithin(auth, skewSeconds = 60, nowSeconds = Math.floo
   return payload.exp - nowSeconds <= skewSeconds;
 }
 
-function tokenExpiresSoon(auth, nowSeconds = Math.floor(Date.now() / 1000)) {
-  return accessTokenExpiresWithin(auth, REFRESH_GRACE_SECONDS, nowSeconds);
+function tokenExpiresSoon(auth, env = process.env, nowSeconds = Math.floor(Date.now() / 1000)) {
+  return accessTokenExpiresWithin(auth, refreshGraceSeconds(env), nowSeconds);
 }
 
 function refreshBody(refreshToken) {
@@ -581,7 +585,7 @@ async function refreshAccountsIfNeeded(accounts, env = process.env, output = pro
       refreshed.push(account);
       continue;
     }
-    if (!tokenExpiresSoon(account.auth)) {
+    if (!tokenExpiresSoon(account.auth, env)) {
       refreshed.push(account);
       continue;
     }
@@ -1142,6 +1146,7 @@ async function cmdDoctor(env, output) {
   output.write(`usage endpoint:  ${env.CODEX_USAGE_ENDPOINT || USAGE_ENDPOINT}\n`);
   output.write(`refresh endpoint:${env.CODEX_REFRESH_TOKEN_URL_OVERRIDE || REFRESH_ENDPOINT}\n`);
   output.write(`display time zone:${displayTimeZone(env)}\n`);
+  output.write(`refresh grace:   ${refreshGraceSeconds(env)} seconds\n`);
 }
 
 function printHelp(output = process.stdout) {
@@ -1161,7 +1166,7 @@ Commands:
   codexm help
 
 Defaults:
-  list and use automatically refresh expiring access tokens before checking usage, except accounts currently in codexm run.
+  list and use automatically refresh access tokens only when they are within 5 minutes of expiry, except accounts currently in codexm run.
   remove without account probes usage and interactively removes offline accounts.
   run wraps the official codex CLI, marks the account in-use while running, and syncs auth after it exits.
 
@@ -1258,10 +1263,5 @@ module.exports = {
   upsertActiveAuthIfChanged,
   getSessionStorePath,
   sessionsByAccount,
+  refreshGraceSeconds,
 };
-
-
-
-
-
-

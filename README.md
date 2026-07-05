@@ -24,7 +24,7 @@ This tool is intentionally small:
 - no token printing
 - no background service
 - no silent account deletion; offline cleanup is interactive unless you pass `--yes`
-- automatic token refresh for normal `list` / `use` workflows
+- automatic token refresh for normal `list` / `use` workflows, but only when the access token is within 5 minutes of expiry
 - active `codexm run` sessions are marked in-use so another terminal will not rotate that account's refresh token
 - account switching does not silently re-add an active auth that was removed from the store
 - accounts without a 5h window are treated as long-window-only accounts
@@ -68,7 +68,7 @@ codexm r 1 --yes
 
 Short aliases are supported: `i`, `a`, `l`, `u`, `r`.
 
-By default, `list` and `use` refresh access tokens that are missing or close to expiry, but they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
+By default, `list` and `use` refresh access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
 
 `sync-codexs` overwrites the codexm store with the current `codexs` account store. `import-codexs` merges instead.
 
@@ -110,6 +110,7 @@ After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read
 CODEX_HOME
 CODEXM_STORE
 CODEXM_TIME_ZONE
+CODEXM_REFRESH_GRACE_SECONDS
 CODEXM_SESSION_STORE
 CODEXM_SESSION_STALE_MS
 CODEXM_SESSION_HEARTBEAT_MS
@@ -120,7 +121,7 @@ CODEX_REFRESH_TOKEN_URL_OVERRIDE
 NO_COLOR
 ```
 
-`CODEX_HOME` lets you test against a temporary Codex home instead of touching `~/.codex`. Reset times are displayed in `Asia/Singapore` by default; set `CODEXM_TIME_ZONE` to override it.
+`CODEX_HOME` lets you test against a temporary Codex home instead of touching `~/.codex`. Reset times are displayed in `Asia/Singapore` by default; set `CODEXM_TIME_ZONE` to override it. `CODEXM_REFRESH_GRACE_SECONDS` defaults to `300`, so normal list checks do not rotate refresh tokens unless the access token is actually near expiry.
 
 ## Notes
 

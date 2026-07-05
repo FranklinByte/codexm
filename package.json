@@ -1,6 +1,6 @@
 {
   "name": "codexm",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "description": "Local-only Codex account manager and official usage viewer.",
   "license": "UNLICENSED",
