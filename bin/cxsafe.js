@@ -371,6 +371,28 @@ function sameAuthTokens(left, right) {
   return JSON.stringify((left && left.tokens) || {}) === JSON.stringify((right && right.tokens) || {});
 }
 
+function accessTokenExp(auth) {
+  const payload = decodeJwtPayload(auth && auth.tokens && auth.tokens.access_token);
+  return payload && typeof payload.exp === 'number' ? payload.exp : null;
+}
+
+function shouldReplaceStoredAuth(storedAuth, currentAuth) {
+  if (sameAuthTokens(storedAuth, currentAuth)) return false;
+  const storedExp = accessTokenExp(storedAuth);
+  const currentExp = accessTokenExp(currentAuth);
+  if (storedExp !== null && currentExp !== null && currentExp < storedExp) return false;
+
+  const storedRefresh = Date.parse((storedAuth && storedAuth.last_refresh) || '');
+  const currentRefresh = Date.parse((currentAuth && currentAuth.last_refresh) || '');
+  if (Number.isFinite(storedRefresh)
+    && Number.isFinite(currentRefresh)
+    && currentRefresh < storedRefresh) {
+    return false;
+  }
+
+  return true;
+}
+
 function updateKnownActiveAuthInStore(env = process.env, source = 'active-sync') {
   let current;
   try {
@@ -387,7 +409,7 @@ function updateKnownActiveAuthInStore(env = process.env, source = 'active-sync')
   }
   const accounts = readSafeStore(env);
   const index = accounts.findIndex((account) => account.id && account.id.toLowerCase() === next.id.toLowerCase());
-  if (index < 0 || sameAuthTokens(accounts[index].auth, current)) return false;
+  if (index < 0 || !shouldReplaceStoredAuth(accounts[index].auth, current)) return false;
   const updated = accounts.slice();
   updated[index] = next;
   writeSafeStore(updated, env);
