@@ -253,57 +253,37 @@ function syncActiveAuthFromStore(accounts, env = process.env) {
   writeFileAtomic(getAuthPath(env), JSON.stringify(account.auth, null, 2) + '\n');
   return true;
 }
-function accessTokenExpiry(auth) {
-  const payload = decodeJwtPayload(auth && auth.tokens && auth.tokens.access_token);
-  return payload && typeof payload.exp === 'number' ? payload.exp : 0;
-}
 
-function refreshTimestamp(auth) {
-  const value = auth && auth.last_refresh;
-  if (typeof value !== 'string') return 0;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
-}
-
-function compareAuthFreshness(left, right) {
-  const leftExp = accessTokenExpiry(left);
-  const rightExp = accessTokenExpiry(right);
-  if (leftExp !== rightExp) return leftExp - rightExp;
-  return refreshTimestamp(left) - refreshTimestamp(right);
-}
-
-function syncActiveAuthWithStore(accounts, env = process.env, options = {}) {
+function upsertActiveAuthIfChanged(beforeAuth, env = process.env, source = 'active-sync') {
   let current;
   try {
     current = readActiveAuth(env);
   } catch (_) {
-    return accounts;
+    return false;
   }
-  if (!current) return accounts;
-  let activeAccount;
+  if (!current || sameAuthTokens(current, beforeAuth)) return false;
+  upsertAccount(current, env, source);
+  return true;
+}
+
+function rememberActiveAuthIfMissing(env = process.env, source = 'pre-switch-backup') {
+  let current;
   try {
-    activeAccount = normalizeAccount(current, options.source || 'active-sync');
+    current = readActiveAuth(env);
   } catch (_) {
-    return accounts;
+    return false;
   }
-  const index = accounts.findIndex((item) => item.id && item.id.toLowerCase() === activeAccount.id.toLowerCase());
-  if (index < 0) {
-    const next = [...accounts, activeAccount];
-    writeSafeStore(next, env);
-    return readSafeStore(env);
+  if (!current) return false;
+  let account;
+  try {
+    account = normalizeAccount(current, source);
+  } catch (_) {
+    return false;
   }
-  const stored = accounts[index];
-  if (sameAuthTokens(current, stored.auth)) return accounts;
-  const comparison = compareAuthFreshness(current, stored.auth);
-  const preferActive = options.preferActive || comparison > 0;
-  if (preferActive) {
-    const next = accounts.slice();
-    next[index] = activeAccount;
-    writeSafeStore(next, env);
-    return readSafeStore(env);
-  }
-  syncActiveAuthFromStore(accounts, env);
-  return accounts;
+  const accounts = readSafeStore(env);
+  if (accounts.some((item) => item.id && item.id.toLowerCase() === account.id.toLowerCase())) return false;
+  writeSafeStore([...accounts, account], env);
+  return true;
 }
 
 function resolveAccount(selector, accounts) {
@@ -810,7 +790,8 @@ async function cmdList(args, env, output) {
   const json = args.includes('--json');
   const noUsage = args.includes('--no-usage');
   const noRefresh = args.includes('--no-refresh');
-  let accounts = syncActiveAuthWithStore(readSafeStore(env), env);
+  let accounts = readSafeStore(env);
+  syncActiveAuthFromStore(accounts, env);
   if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env);
   syncActiveAuthFromStore(accounts, env);
   if (noUsage) {
@@ -824,7 +805,8 @@ async function cmdList(args, env, output) {
 }
 
 async function cmdUse(args, env, output) {
-  let accounts = syncActiveAuthWithStore(readSafeStore(env), env);
+  let accounts = readSafeStore(env);
+  syncActiveAuthFromStore(accounts, env);
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
     accounts = await refreshAccountsIfNeeded(accounts, env);
@@ -851,12 +833,7 @@ async function cmdUse(args, env, output) {
 }
 
 async function activateAccount(account, env, output) {
-  try {
-    const current = readActiveAuth(env);
-    if (current) upsertAccount(current, env, 'pre-switch-backup');
-  } catch (_) {
-    // Do not block switching if the active slot is unreadable.
-  }
+  rememberActiveAuthIfMissing(env, 'pre-switch-backup');
   writeFileAtomic(getAuthPath(env), `${JSON.stringify(account.auth, null, 2)}\n`);
   output.write(`activated ${displayAccount(account)} at ${getAuthPath(env)}\n`);
 }
@@ -864,7 +841,8 @@ async function activateAccount(account, env, output) {
 async function cmdRefresh(args, env, output) {
   const selector = args[0] || 'all';
   if (args.length > 1) throw new Error('usage: codexm refresh [all|account]');
-  const accounts = syncActiveAuthWithStore(readSafeStore(env), env);
+  const accounts = readSafeStore(env);
+  syncActiveAuthFromStore(accounts, env);
   const targets = selector === 'all'
     ? accounts
     : [resolveAccount(selector, accounts)].filter(Boolean);
@@ -887,11 +865,17 @@ async function cmdRefresh(args, env, output) {
 async function cmdRun(args, env, output) {
   const codexBin = env.CODEXM_REAL_CODEX_BIN || findCodexBin(env);
   if (!codexBin) throw new Error('codex executable not found; set CODEXM_REAL_CODEX_BIN, CODEX_BIN, or add codex to PATH');
-  const accounts = syncActiveAuthWithStore(readSafeStore(env), env);
+  const accounts = readSafeStore(env);
   syncActiveAuthFromStore(accounts, env);
+  let beforeAuth = null;
+  try {
+    beforeAuth = readActiveAuth(env);
+  } catch (_) {
+    beforeAuth = null;
+  }
   const result = runCodex(codexBin, args, env);
   try {
-    syncActiveAuthWithStore(readSafeStore(env), env, { preferActive: true, source: 'codex-run' });
+    upsertActiveAuthIfChanged(beforeAuth, env, 'codex-run');
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     output.write(`warning: failed to sync active auth after codex: ${message}\n`);
@@ -1093,7 +1077,8 @@ module.exports = {
   formatReset,
   displayTimeZone,
   syncActiveAuthFromStore,
-  syncActiveAuthWithStore,
+  upsertActiveAuthIfChanged,
+  rememberActiveAuthIfMissing,
 };
 
 

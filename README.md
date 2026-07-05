@@ -93,7 +93,7 @@ Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex 
 alias codex='codexm run'
 ```
 
-After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`.
+After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`.
 
 ## Environment Variables
 
