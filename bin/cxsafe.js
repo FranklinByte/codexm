@@ -960,7 +960,6 @@ async function cmdList(args, env, output) {
   const json = args.includes('--json');
   const noUsage = args.includes('--no-usage');
   const noRefresh = args.includes('--no-refresh');
-  updateKnownActiveAuthInStore(env, 'active-auth');
   let accounts = readSafeStore(env);
   if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env, output);
   if (noUsage) {
@@ -974,7 +973,6 @@ async function cmdList(args, env, output) {
 }
 
 async function cmdUse(args, env, output) {
-  updateKnownActiveAuthInStore(env, 'pre-switch-sync');
   let accounts = readSafeStore(env);
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
@@ -1010,7 +1008,6 @@ async function cmdRefresh(args, env, output) {
   const positional = args.filter((arg) => arg !== '--force');
   const selector = positional[0] || 'all';
   if (positional.length > 1) throw new Error('usage: codexm refresh [all|account] [--force]');
-  updateKnownActiveAuthInStore(env, 'pre-refresh-sync');
   const accounts = readSafeStore(env);
   const targets = selector === 'all'
     ? accounts
@@ -1044,7 +1041,6 @@ async function cmdRefresh(args, env, output) {
 async function cmdRun(args, env, output) {
   const codexBin = env.CODEXM_REAL_CODEX_BIN || findCodexBin(env);
   if (!codexBin) throw new Error('codex executable not found; set CODEXM_REAL_CODEX_BIN, CODEX_BIN, or add codex to PATH');
-  updateKnownActiveAuthInStore(env, 'pre-run-sync');
   let beforeAuth = null;
   try {
     beforeAuth = readActiveAuth(env);
@@ -1184,7 +1180,7 @@ Commands:
   codexm help
 
 Defaults:
-  list and use save current auth first, then refresh access tokens only within 5 minutes of expiry, except accounts currently in codexm run.
+  list and use refresh stored access tokens only within 5 minutes of expiry, except accounts currently in codexm run.
   remove without account probes usage and interactively removes offline accounts.
   run wraps the official codex CLI, marks the account in-use while running, and syncs auth after it exits.
 

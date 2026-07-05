@@ -69,7 +69,7 @@ codexm r 1 --yes
 
 Short aliases are supported: `i`, `a`, `l`, `u`, `r`.
 
-By default, `list` and `use` first save the current `auth.json` back to the account store when that account already exists there and is not older than the stored token, then refresh access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
+By default, `list` and `use` refresh stored access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Account switching is one-way from the codexm store into `auth.json`, matching `codexs`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
 
 `sync-codexs` overwrites the codexm store with the current `codexs` account store. `import-codexs` merges instead.
 
