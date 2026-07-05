@@ -371,31 +371,26 @@ function sameAuthTokens(left, right) {
   return JSON.stringify((left && left.tokens) || {}) === JSON.stringify((right && right.tokens) || {});
 }
 
-function syncActiveAuthFromStore(accounts, env = process.env) {
-  const active = activeLabel(env).toLowerCase();
-  if (!active) return false;
-  const account = accounts.find((item) => item.id && item.id.toLowerCase() === active);
-  if (!account || !account.auth) return false;
+function updateKnownActiveAuthInStore(env = process.env, source = 'active-sync') {
   let current;
   try {
     current = readActiveAuth(env);
   } catch (_) {
     return false;
   }
-  if (!current || sameAuthTokens(current, account.auth)) return false;
-  writeFileAtomic(getAuthPath(env), JSON.stringify(account.auth, null, 2) + '\n');
-  return true;
-}
-
-function upsertActiveAuthIfChanged(beforeAuth, env = process.env, source = 'active-sync') {
-  let current;
+  if (!current) return false;
+  let next;
   try {
-    current = readActiveAuth(env);
+    next = normalizeAccount(current, source);
   } catch (_) {
     return false;
   }
-  if (!current || sameAuthTokens(current, beforeAuth)) return false;
-  upsertAccount(current, env, source);
+  const accounts = readSafeStore(env);
+  const index = accounts.findIndex((account) => account.id && account.id.toLowerCase() === next.id.toLowerCase());
+  if (index < 0 || sameAuthTokens(accounts[index].auth, current)) return false;
+  const updated = accounts.slice();
+  updated[index] = next;
+  writeSafeStore(updated, env);
   return true;
 }
 
@@ -943,10 +938,9 @@ async function cmdList(args, env, output) {
   const json = args.includes('--json');
   const noUsage = args.includes('--no-usage');
   const noRefresh = args.includes('--no-refresh');
+  updateKnownActiveAuthInStore(env, 'active-auth');
   let accounts = readSafeStore(env);
-  syncActiveAuthFromStore(accounts, env);
   if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env, output);
-  syncActiveAuthFromStore(accounts, env);
   if (noUsage) {
     if (json) output.write(`${JSON.stringify(usageJson(accounts, [], env), null, 2)}\n`);
     else outputAccountTable(accounts, env, output);
@@ -958,12 +952,11 @@ async function cmdList(args, env, output) {
 }
 
 async function cmdUse(args, env, output) {
+  updateKnownActiveAuthInStore(env, 'pre-switch-sync');
   let accounts = readSafeStore(env);
-  syncActiveAuthFromStore(accounts, env);
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
     accounts = await refreshAccountsIfNeeded(accounts, env, output);
-    syncActiveAuthFromStore(accounts, env);
     const usages = await fetchUsagesForList(accounts, env);
     const active = activeLabel(env).toLowerCase();
     const current = accounts.find((account) => active && account.id.toLowerCase() === active);
@@ -995,14 +988,15 @@ async function cmdRefresh(args, env, output) {
   const positional = args.filter((arg) => arg !== '--force');
   const selector = positional[0] || 'all';
   if (positional.length > 1) throw new Error('usage: codexm refresh [all|account] [--force]');
+  updateKnownActiveAuthInStore(env, 'pre-refresh-sync');
   const accounts = readSafeStore(env);
-  syncActiveAuthFromStore(accounts, env);
   const targets = selector === 'all'
     ? accounts
     : [resolveAccount(selector, accounts)].filter(Boolean);
   if (targets.length === 0) throw new Error(`account not found: ${selector}`);
   const byId = new Map(accounts.map((account) => [account.id.toLowerCase(), account]));
   const busyByAccount = sessionsByAccount(env);
+  const active = activeLabel(env).toLowerCase();
   for (const account of targets) {
     const busy = busyByAccount.get(account.id.toLowerCase());
     if (busy && !force) {
@@ -1014,19 +1008,21 @@ async function cmdRefresh(args, env, output) {
       output.write(`skipped ${displayAccount(account)}: no refresh_token\n`);
       continue;
     }
-    byId.set(account.id.toLowerCase(), normalizeAccount(nextAuth, 'refresh'));
+    const next = normalizeAccount(nextAuth, 'refresh');
+    byId.set(account.id.toLowerCase(), next);
+    if (active && account.id.toLowerCase() === active) {
+      writeFileAtomic(getAuthPath(env), `${JSON.stringify(nextAuth, null, 2)}\n`);
+    }
     output.write(`refreshed ${displayAccount(account)}\n`);
   }
   const nextAccounts = [...byId.values()];
   writeSafeStore(nextAccounts, env);
-  syncActiveAuthFromStore(nextAccounts, env);
 }
 
 async function cmdRun(args, env, output) {
   const codexBin = env.CODEXM_REAL_CODEX_BIN || findCodexBin(env);
   if (!codexBin) throw new Error('codex executable not found; set CODEXM_REAL_CODEX_BIN, CODEX_BIN, or add codex to PATH');
-  const accounts = readSafeStore(env);
-  syncActiveAuthFromStore(accounts, env);
+  updateKnownActiveAuthInStore(env, 'pre-run-sync');
   let beforeAuth = null;
   try {
     beforeAuth = readActiveAuth(env);
@@ -1053,7 +1049,7 @@ async function cmdRun(args, env, output) {
     if (heartbeat) clearInterval(heartbeat);
     if (lease) lease.release();
     try {
-      upsertActiveAuthIfChanged(beforeAuth, env, 'codex-run');
+      updateKnownActiveAuthInStore(env, 'codex-run');
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       output.write(`warning: failed to sync active auth after codex: ${message}\n`);
@@ -1166,7 +1162,7 @@ Commands:
   codexm help
 
 Defaults:
-  list and use automatically refresh access tokens only when they are within 5 minutes of expiry, except accounts currently in codexm run.
+  list and use save current auth first, then refresh access tokens only within 5 minutes of expiry, except accounts currently in codexm run.
   remove without account probes usage and interactively removes offline accounts.
   run wraps the official codex CLI, marks the account in-use while running, and syncs auth after it exits.
 
@@ -1259,8 +1255,7 @@ module.exports = {
   remainingFromUsed,
   formatReset,
   displayTimeZone,
-  syncActiveAuthFromStore,
-  upsertActiveAuthIfChanged,
+  updateKnownActiveAuthInStore,
   getSessionStorePath,
   sessionsByAccount,
   refreshGraceSeconds,

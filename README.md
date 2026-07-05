@@ -26,6 +26,7 @@ This tool is intentionally small:
 - no silent account deletion; offline cleanup is interactive unless you pass `--yes`
 - automatic token refresh for normal `list` / `use` workflows, but only when the access token is within 5 minutes of expiry
 - active `codexm run` sessions are marked in-use so another terminal will not rotate that account's refresh token
+- account switching first saves the current active auth when that account already exists in the store
 - account switching does not silently re-add an active auth that was removed from the store
 - accounts without a 5h window are treated as long-window-only accounts
 - usage and refresh requests only go to OpenAI/ChatGPT endpoints
@@ -68,7 +69,7 @@ codexm r 1 --yes
 
 Short aliases are supported: `i`, `a`, `l`, `u`, `r`.
 
-By default, `list` and `use` refresh access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
+By default, `list` and `use` first save the current `auth.json` back to the account store when that account already exists there, then refresh access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
 
 `sync-codexs` overwrites the codexm store with the current `codexs` account store. `import-codexs` merges instead.
 
@@ -102,7 +103,7 @@ Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex 
 alias codex='codexm run'
 ```
 
-After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. It does not write local auth back to the shared store during account switching, and switching will not re-add an active account that you removed from the store; only `codexm run` copies auth back after the official Codex CLI actually changes `auth.json`. While `codexm run` is active, other terminals see that account as `in-use` and will not rotate its refresh token during list/refresh checks.
+After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`. Before switching, it writes the current local auth back to the shared store only if that account already exists there, so refreshes performed by the Windows Codex App or CLI are preserved. It will not re-add an active account that you removed from the store. `codexm run` also copies auth back after the official Codex CLI changes `auth.json`. While `codexm run` is active, other terminals see that account as `in-use` and will not rotate its refresh token during list/refresh checks.
 
 ## Environment Variables
 
