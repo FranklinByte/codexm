@@ -52,6 +52,7 @@ codexm u user@example.com
 codexm u
 codexm a
 codexm refresh all
+codexm run --help
 codexm r
 codexm r 1 --yes
 ```
@@ -86,7 +87,13 @@ Use one shared account store to avoid refresh-token drift between Windows and WS
 export CODEXM_STORE=/mnt/c/Users/Kellan/.codex/codexm-accounts.json
 ```
 
-Add that line to `~/.bashrc` or `~/.zshrc` in WSL. After this, `codexm list`, `codexm use`, and `codexm refresh` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`.
+Add that line to `~/.bashrc` or `~/.zshrc` in WSL. Also wrap the official Codex CLI so refreshes performed by Codex are copied back into the shared store:
+
+```bash
+alias codex='codexm run'
+```
+
+After this, `codexm list`, `codexm use`, `codexm refresh`, and `codexm run` read and update the shared account store; when the current account matches, codexm also syncs the refreshed token into the local `~/.codex/auth.json`.
 
 ## Environment Variables
 

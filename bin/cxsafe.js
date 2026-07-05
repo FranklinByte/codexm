@@ -253,6 +253,58 @@ function syncActiveAuthFromStore(accounts, env = process.env) {
   writeFileAtomic(getAuthPath(env), JSON.stringify(account.auth, null, 2) + '\n');
   return true;
 }
+function accessTokenExpiry(auth) {
+  const payload = decodeJwtPayload(auth && auth.tokens && auth.tokens.access_token);
+  return payload && typeof payload.exp === 'number' ? payload.exp : 0;
+}
+
+function refreshTimestamp(auth) {
+  const value = auth && auth.last_refresh;
+  if (typeof value !== 'string') return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+}
+
+function compareAuthFreshness(left, right) {
+  const leftExp = accessTokenExpiry(left);
+  const rightExp = accessTokenExpiry(right);
+  if (leftExp !== rightExp) return leftExp - rightExp;
+  return refreshTimestamp(left) - refreshTimestamp(right);
+}
+
+function syncActiveAuthWithStore(accounts, env = process.env, options = {}) {
+  let current;
+  try {
+    current = readActiveAuth(env);
+  } catch (_) {
+    return accounts;
+  }
+  if (!current) return accounts;
+  let activeAccount;
+  try {
+    activeAccount = normalizeAccount(current, options.source || 'active-sync');
+  } catch (_) {
+    return accounts;
+  }
+  const index = accounts.findIndex((item) => item.id && item.id.toLowerCase() === activeAccount.id.toLowerCase());
+  if (index < 0) {
+    const next = [...accounts, activeAccount];
+    writeSafeStore(next, env);
+    return readSafeStore(env);
+  }
+  const stored = accounts[index];
+  if (sameAuthTokens(current, stored.auth)) return accounts;
+  const comparison = compareAuthFreshness(current, stored.auth);
+  const preferActive = options.preferActive || comparison > 0;
+  if (preferActive) {
+    const next = accounts.slice();
+    next[index] = activeAccount;
+    writeSafeStore(next, env);
+    return readSafeStore(env);
+  }
+  syncActiveAuthFromStore(accounts, env);
+  return accounts;
+}
 
 function resolveAccount(selector, accounts) {
   if (!selector) throw new Error('missing account selector');
@@ -453,6 +505,18 @@ function isExecutable(filePath) {
   } catch (_) {
     return false;
   }
+}
+
+function runCodex(codexBin, args, env = process.env) {
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(codexBin)) {
+    const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
+    return spawnSync(comspec, ['/d', '/s', '/c', `"${codexBin}" ${args.map((arg) => `"${String(arg).replace(/"/g, '\"')}"`).join(' ')}`], {
+      stdio: 'inherit',
+      env,
+      windowsVerbatimArguments: true,
+    });
+  }
+  return spawnSync(codexBin, args, { stdio: 'inherit', env });
 }
 
 function runCodexLogin(codexBin, tempHome, env = process.env) {
@@ -746,7 +810,7 @@ async function cmdList(args, env, output) {
   const json = args.includes('--json');
   const noUsage = args.includes('--no-usage');
   const noRefresh = args.includes('--no-refresh');
-  let accounts = readSafeStore(env);
+  let accounts = syncActiveAuthWithStore(readSafeStore(env), env);
   if (!noRefresh) accounts = await refreshAccountsIfNeeded(accounts, env);
   syncActiveAuthFromStore(accounts, env);
   if (noUsage) {
@@ -760,7 +824,7 @@ async function cmdList(args, env, output) {
 }
 
 async function cmdUse(args, env, output) {
-  let accounts = readSafeStore(env);
+  let accounts = syncActiveAuthWithStore(readSafeStore(env), env);
   if (args.length > 1) throw new Error('usage: codexm use [account]');
   if (args.length === 0) {
     accounts = await refreshAccountsIfNeeded(accounts, env);
@@ -800,7 +864,7 @@ async function activateAccount(account, env, output) {
 async function cmdRefresh(args, env, output) {
   const selector = args[0] || 'all';
   if (args.length > 1) throw new Error('usage: codexm refresh [all|account]');
-  const accounts = readSafeStore(env);
+  const accounts = syncActiveAuthWithStore(readSafeStore(env), env);
   const targets = selector === 'all'
     ? accounts
     : [resolveAccount(selector, accounts)].filter(Boolean);
@@ -818,6 +882,22 @@ async function cmdRefresh(args, env, output) {
   const nextAccounts = [...byId.values()];
   writeSafeStore(nextAccounts, env);
   syncActiveAuthFromStore(nextAccounts, env);
+}
+
+async function cmdRun(args, env, output) {
+  const codexBin = env.CODEXM_REAL_CODEX_BIN || findCodexBin(env);
+  if (!codexBin) throw new Error('codex executable not found; set CODEXM_REAL_CODEX_BIN, CODEX_BIN, or add codex to PATH');
+  const accounts = syncActiveAuthWithStore(readSafeStore(env), env);
+  syncActiveAuthFromStore(accounts, env);
+  const result = runCodex(codexBin, args, env);
+  try {
+    syncActiveAuthWithStore(readSafeStore(env), env, { preferActive: true, source: 'codex-run' });
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    output.write(`warning: failed to sync active auth after codex: ${message}\n`);
+  }
+  if (result.error) throw result.error;
+  if (typeof result.status === 'number' && result.status !== 0) process.exitCode = result.status;
 }
 
 async function cmdRemove(args, env, output, input) {
@@ -914,12 +994,14 @@ Commands:
   codexm list | l [--json] [--no-usage] [--no-refresh]
   codexm use | u [account]
   codexm refresh [all|account]
+  codexm run [codex args...]
   codexm remove | r [account] [--yes]
   codexm help
 
 Defaults:
   list and use automatically refresh expiring access tokens before checking usage.
   remove without account probes usage and interactively removes offline accounts.
+  run wraps the official codex CLI and syncs auth before and after it exits.
 
 Account selectors:
   1, 2, ...          list index
@@ -979,6 +1061,9 @@ async function main(argv = process.argv.slice(2), io = {}) {
     case 'refresh':
       await cmdRefresh(args, env, output);
       break;
+    case 'run':
+      await cmdRun(args, env, output);
+      break;
     case 'remove':
       await cmdRemove(args, env, output, input);
       break;
@@ -1008,6 +1093,7 @@ module.exports = {
   formatReset,
   displayTimeZone,
   syncActiveAuthFromStore,
+  syncActiveAuthWithStore,
 };
 
 
