@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const cli = require('../bin/cxsafe.js');
+const commands = require('../src/commands');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codexm-local-'));
 const home = path.join(tmp, 'codex-home');
@@ -35,6 +36,24 @@ async function run(args, env) { const out = output(); await cli.main(args, { env
   await run(['init'], env);
   const written = JSON.parse(fs.readFileSync(storePath, 'utf8'));
   if (!Array.isArray(written.accounts) || written.accounts.some((item) => item.auth)) throw new Error('store was not written in codexs auth-array shape');
+
+  const beforeList = fs.readFileSync(storePath, 'utf8');
+  const listOut = output();
+  await commands.listAccounts(env, listOut, {
+    refreshFetch: async () => { throw new Error('list unexpectedly called refresh'); },
+    usageFetch: async () => ({
+      ok: true,
+      json: async () => ({
+        plan_type: 'Team',
+        rate_limit: {
+          primary_window: { limit_window_seconds: 18000, used_percent: 12, reset_at: Math.floor(Date.now() / 1000) + 1800 },
+          secondary_window: { limit_window_seconds: 604800, used_percent: 34, reset_at: Math.floor(Date.now() / 1000) + 86400 },
+        },
+      }),
+    }),
+  });
+  const afterList = fs.readFileSync(storePath, 'utf8');
+  if (afterList !== beforeList) throw new Error('list modified account store');
 
   await run(['remove', '1'], env);
   const afterRemove = JSON.parse(fs.readFileSync(storePath, 'utf8'));

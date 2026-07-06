@@ -1,8 +1,8 @@
 {
   "name": "codexm",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
-  "description": "Codexs-compatible local Codex account manager.",
+  "description": "Local Codex account manager with safe read-only listing.",
   "license": "MIT",
   "type": "commonjs",
   "bin": {

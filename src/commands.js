@@ -353,9 +353,7 @@ const refreshAccountsForList = async (accounts, activeLabel, env = process.env, 
 const listAccounts = async (env = process.env, output = process.stdout, services = {}) => {
   ensureDir(getCodexHome(env));
   const activeLabel = currentSlotLabel(env);
-  const accounts = await term.withProgress('正在刷新登录态...', () => {
-    return refreshAccountsForList(readAccounts(env), activeLabel, env, services);
-  }, env);
+  const accounts = readAccounts(env);
   const usageResults = await term.withProgress('正在查询账号额度...', () => {
     return usage.loadUsage(accounts, services.usageFetch);
   }, env);

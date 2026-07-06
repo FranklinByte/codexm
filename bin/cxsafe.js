@@ -7,9 +7,10 @@ const commands = require('../src/commands');
 const { readAccounts, writeAccounts } = require('../src/accounts');
 const { getAccountsFile, getCodexHome } = require('../src/paths');
 const { findCodexBin } = require('../src/codex');
+const pkg = require('../package.json');
 
 function usage(output = process.stdout) {
-  output.write(`codexm - Codex account switcher, codexs-compatible local build
+  output.write(`codexm - Codex account switcher, safe local build
 
 Commands:
   codexm init|i
@@ -23,7 +24,7 @@ Commands:
 
 Notes:
   account can be a list number, email, or short account id.
-  use without account auto-selects an available account, same as codexs.
+  list is read-only: it queries usage but never refreshes stored tokens.
   codexm stores accounts in ~/.codex/codexm-accounts.json using the codexs store shape.
   ~/.codex/auth.json is the active Codex slot.
   codexm never wraps the official codex command. After switching, run codex directly.
@@ -78,6 +79,8 @@ async function main(argv = process.argv.slice(2), io = {}) {
     sync: 'sync-codexs',
     '-h': 'help',
     '--help': 'help',
+    '-v': 'version',
+    '--version': 'version',
   };
   const [raw = 'help', ...args] = argv;
   const command = ALIAS[raw] || raw;
@@ -115,6 +118,9 @@ async function main(argv = process.argv.slice(2), io = {}) {
       break;
     case 'run':
       throw new Error('codexm run was removed; use codexm use to switch accounts, then run the official codex command directly');
+    case 'version':
+      output.write(pkg.version + '\n');
+      break;
     case 'help':
       usage(output);
       break;
