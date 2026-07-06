@@ -1,9 +1,9 @@
 {
   "name": "codexm",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "private": true,
-  "description": "Local-only Codex account manager and official usage viewer.",
-  "license": "UNLICENSED",
+  "description": "Codexs-compatible local Codex account manager.",
+  "license": "MIT",
   "type": "commonjs",
   "bin": {
     "codexm": "bin/cxsafe.js"
@@ -12,8 +12,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check bin/cxsafe.js",
-    "smoke": "node bin/cxsafe.js help"
+    "check": "node scripts/check-syntax.js",
+    "smoke": "node bin/cxsafe.js help",
+    "test": "node scripts/local-smoke.js"
   },
   "repository": {
     "type": "git",
