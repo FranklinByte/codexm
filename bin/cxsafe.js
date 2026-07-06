@@ -1039,6 +1039,9 @@ async function cmdRefresh(args, env, output) {
 }
 
 async function cmdRun(args, env, output) {
+  if (env.CODEXM_ENABLE_RUN !== '1') {
+    throw new Error('codexm run is disabled by default; use codexm use to switch accounts, then run the official codex command directly');
+  }
   const codexBin = env.CODEXM_REAL_CODEX_BIN || findCodexBin(env);
   if (!codexBin) throw new Error('codex executable not found; set CODEXM_REAL_CODEX_BIN, CODEX_BIN, or add codex to PATH');
   let beforeAuth = null;
@@ -1175,14 +1178,14 @@ Commands:
   codexm list | l [--json] [--no-usage] [--no-refresh]
   codexm use | u [account]
   codexm refresh [all|account] [--force]
-  codexm run [codex args...]
+  codexm run [codex args...]  disabled unless CODEXM_ENABLE_RUN=1
   codexm remove | r [account] [--yes]
   codexm help
 
 Defaults:
-  list and use refresh stored access tokens only within 5 minutes of expiry, except accounts currently in codexm run.
+  list and use refresh stored access tokens only within 5 minutes of expiry.
   remove without account probes usage and interactively removes offline accounts.
-  run wraps the official codex CLI, marks the account in-use while running, and syncs auth after it exits.
+  run is disabled by default; use the official codex command directly after switching accounts.
 
 Account selectors:
   1, 2, ...          list index

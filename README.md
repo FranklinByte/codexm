@@ -62,14 +62,13 @@ codexm u
 codexm a
 codexm refresh all
 codexm refresh all --force
-codexm run --help
 codexm r
 codexm r 1 --yes
 ```
 
 Short aliases are supported: `i`, `a`, `l`, `u`, `r`.
 
-By default, `list` and `use` refresh stored access tokens only when they are expired or within 5 minutes of expiry, and they skip accounts currently marked in-use by `codexm run`. Account switching is one-way from the codexm store into `auth.json`, matching `codexs`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
+By default, `list` and `use` refresh stored access tokens only when they are expired or within 5 minutes of expiry. Account switching is one-way from the codexm store into `auth.json`, matching `codexs`. Use `list --no-refresh` only when you explicitly want a diagnostic run without token refresh. `refresh --force` overrides the in-use guard.
 
 `sync-codexs` overwrites the codexm store with the current `codexs` account store. `import-codexs` merges instead.
 
@@ -99,11 +98,7 @@ cp /mnt/c/Users/<WindowsUser>/.codex/codexm-accounts.json ~/.codex/codexm-accoun
 chmod 600 ~/.codex/codexm-accounts.json
 ```
 
-You can still wrap the official Codex CLI in WSL so refreshes performed by Codex are copied back into WSL's local store:
-
-```bash
-alias codex='codexm run'
-```
+Do not alias `codex` to `codexm run`. Use `codexm use <account>` to switch, then run the official `codex` command directly. This keeps codexm as a manager only, matching the `codexs` operating model.
 
 Avoid setting `CODEXM_STORE` in WSL to the Windows account file for normal Windows App + WSL simultaneous use. That creates a shared store with separate active auth files, so one side can write an older token over the other side's newer token.
 
